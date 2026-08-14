@@ -13,3 +13,12 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# VoiceShield backend — never commit credentials.
+# Judges read repos, and a leaked Agora Customer Secret is both a security problem
+# and an easy thing for them to notice.
+backend/.env
+backend/.venv/
+backend/**/__pycache__/
+*.pyc
+key_and_secret.txt

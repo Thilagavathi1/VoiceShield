@@ -1,4 +1,4 @@
-package com.example.voiceaiagent
+package com.voiceshield
 
 import org.junit.Test
 

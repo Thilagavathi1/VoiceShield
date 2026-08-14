@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VoiceAiAgent"
+rootProject.name = "VoiceShield"
 include(":app")

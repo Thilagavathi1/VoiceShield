@@ -1,4 +1,4 @@
-package com.example.voiceaiagent.ui.theme
+package com.voiceshield.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
