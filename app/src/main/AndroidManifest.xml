@@ -10,6 +10,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!--
+      Auto-arm: know that a call is incoming, and whether the caller is a stranger.
+      READ_CONTACTS is what lets VoiceShield stay silent through the 99% of calls that are
+      family — without it we must guard every call, which gets the app uninstalled.
+    -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!--
       VoiceShield guards a call that is ALREADY in progress, which means our app is in the
       background while it listens. From Android 14 (API 34) a backgrounded app cannot
       hold the microphone unless it runs a foreground service typed `microphone`, and
@@ -47,6 +56,32 @@
             android:name=".guard.GuardService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!--
+          Sees incoming calls before they ring. Bound by the system, so it must be exported
+          and protected with BIND_SCREENING_SERVICE. Only active once the user grants
+          ROLE_CALL_SCREENING.
+        -->
+        <service
+            android:name=".guard.call.ScamCallScreeningService"
+            android:exported="true"
+            android:permission="android.permission.BIND_SCREENING_SERVICE">
+            <intent-filter>
+                <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Tells us when an armed call is actually answered. PHONE_STATE is exempt from the
+          implicit-broadcast restrictions, so this still fires with the app not running.
+        -->
+        <receiver
+            android:name=".guard.call.PhoneStateReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

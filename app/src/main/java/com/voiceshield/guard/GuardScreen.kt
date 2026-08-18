@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -52,6 +53,8 @@ fun GuardScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     showDebug: Boolean = false,
+    autoProtectOn: Boolean = false,
+    onEnableAutoProtect: (() -> Unit)? = null,
 ) {
     val target = when (ui.state) {
         GuardState.ALERT -> Danger
@@ -79,7 +82,14 @@ fun GuardScreen(
                 GuardState.WATCHING -> Headline("सुन रहा हूँ", "Listening — you are protected")
                 GuardState.STARTING -> Headline("शुरू हो रहा है…", "Starting")
                 GuardState.ERROR -> Headline("समस्या", ui.message ?: "Something went wrong")
-                GuardState.IDLE -> Headline("VoiceShield", "Tap the button before you answer")
+                GuardState.IDLE -> Headline(
+                    "VoiceShield",
+                    if (autoProtectOn) {
+                        "Protection is automatic — just answer the phone"
+                    } else {
+                        "Tap the button before you answer"
+                    },
+                )
             }
 
             Spacer(Modifier.height(48.dp))
@@ -90,10 +100,24 @@ fun GuardScreen(
                 BigButton("बंद करो\nSTOP", Color(0xFF37474F), onStop)
             }
 
+            // Setup lives at the bottom of the idle screen because it is a one-time job for
+            // the family member installing the app, not something the elder ever touches.
+            if (ui.state == GuardState.IDLE && !autoProtectOn && onEnableAutoProtect != null) {
+                Spacer(Modifier.height(32.dp))
+                TextButton(onClick = onEnableAutoProtect) {
+                    Text(
+                        text = "Turn on automatic protection →",
+                        color = Ink.copy(alpha = 0.85f),
+                        fontSize = 17.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
             if (showDebug) {
                 Spacer(Modifier.height(28.dp))
                 Text(
-                    text = "risk ${ui.risk} · ${ui.pattern} · ${ui.latencyMs}ms" +
+                    text = "risk ${ui.risk} · ${ui.pattern} · ${ui.latencyMs}ms · ${ui.trigger}" +
                         if (ui.signals.isEmpty()) "" else "\n${ui.signals.joinToString(" · ")}",
                     color = Ink.copy(alpha = 0.72f),
                     fontSize = 13.sp,
