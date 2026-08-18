@@ -44,15 +44,23 @@ async def main() -> int:
         if line.strip()
     ]
     threshold = settings().warn_threshold
-    print(f"{len(cases)} cases, warn threshold {threshold}\n")
+    rpm = settings().eval_requests_per_minute
+    print(f"{len(cases)} cases, warn threshold {threshold}, paced at {rpm} req/min")
+    print(f"model: {settings().classifier_model}  (allow ~{len(cases) * 60 // rpm}s)\n")
 
-    sem = asyncio.Semaphore(6)
+    # Pace the run to the free tier's request-per-minute ceiling. Firing these
+    # concurrently rate-limits the account, every case falls back to the rule floor,
+    # and the resulting numbers measure the wrong thing entirely -- which is exactly
+    # what happened the first time this was run.
+    sem = asyncio.Semaphore(2)
+    gap = 60.0 / max(1, settings().eval_requests_per_minute)
 
-    async def run(case: dict) -> tuple[dict, object]:
+    async def run(index: int, case: dict) -> tuple[dict, object]:
+        await asyncio.sleep(index * gap)
         async with sem:
             return case, await classify(to_messages(case["turns"]))
 
-    results = await asyncio.gather(*(run(c) for c in cases))
+    results = await asyncio.gather(*(run(i, c) for i, c in enumerate(cases)))
 
     # Infrastructure failures are NOT data points. Counting an unreachable API as a
     # correctly-scored "safe" case is how an eval reports 0% false alarms while
@@ -114,6 +122,14 @@ async def main() -> int:
     if results and all(v.degraded for _c, v in results):
         print("\n!! Every case was judged by the rule layer alone (LLM unavailable).")
         print("   Report these as rule-floor numbers, not VoiceShield's accuracy.")
+
+    mix: dict[str, int] = {}
+    for _c, v in results:
+        mix[v.source] = mix.get(v.source, 0) + 1
+    print("\nverdicts by layer:", ", ".join(f"{k}={n}" for k, n in sorted(mix.items())))
+    if mix.get("rules", 0):
+        print(f"!! {mix['rules']} case(s) fell back to the keyword floor — "
+              "the model was unreachable for those, so treat them as degraded.")
 
     scams = tp + fn
     legit = tn + fp

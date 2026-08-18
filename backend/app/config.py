@@ -15,9 +15,13 @@ class Settings(BaseSettings):
     # only paid component of VoiceShield at zero cost. The rule layer in rules.py
     # runs underneath it and needs no key at all.
     gemini_api_key: str = ""
-    classifier_model: str = "gemini-2.5-flash"
+    classifier_model: str = "gemini-3.5-flash-lite"
 
     public_base_url: str = ""
+
+    # Free-tier request ceiling, used to pace the corpus run so rate limiting does
+    # not silently turn an accuracy measurement into a rule-floor measurement.
+    eval_requests_per_minute: int = 5
 
     warn_threshold: int = 70
     notice_threshold: int = 40

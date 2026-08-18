@@ -87,13 +87,16 @@ class Verdict:
         self.warnings = warnings or {}
         self.latency_ms = latency_ms
         self.error = error
-        # "llm" full protection | "rules" degraded but real | "none" no judgement
+        # "llm"      judged by the model
+        # "screened" rules found nothing and the model was deliberately not asked
+        # "rules"    model was unreachable, keyword floor only (degraded)
+        # "none"     no judgement at all
         self.source = source
 
     @property
     def usable(self) -> bool:
-        """True when this verdict reflects an actual judgement, LLM or rules."""
-        return self.source in ("llm", "rules")
+        """True when this verdict reflects an actual judgement."""
+        return self.source in ("llm", "screened", "rules")
 
     @property
     def degraded(self) -> bool:
@@ -166,27 +169,73 @@ async def classify(messages: list[dict[str, Any]]) -> Verdict:
     rule = rules.score(turns)
     started = time.perf_counter()
 
-    try:
-        resp = await gemini().aio.models.generate_content(
-            model=settings().classifier_model,
-            contents=transcript,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                # Schema-constrained JSON: no fence parsing, so a malformed reply
-                # can no longer be mistaken for "safe".
-                response_mime_type="application/json",
-                response_schema=LlmVerdict,
-                max_output_tokens=600,
-                # Deterministic: the same call should not score differently on a
-                # retry, or the corpus numbers mean nothing.
-                temperature=0,
-                # No thinking: this is a fast classifier racing a live scammer.
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+    # Gate the model behind the free layer. Gemini's free tier allows only a handful
+    # of requests per minute -- far fewer than a live call produces -- so asking it
+    # about every turn guarantees rate-limit failures at the worst moment. Most turns
+    # in a real conversation trip no signal at all, and the rule layer scores those 0
+    # with zero false alarms across the corpus, so they need no second opinion.
+    #
+    # The periodic check is the safety valve: a scam phrased entirely in words the
+    # rule vocabulary does not know would otherwise never reach the model.
+    if rule.risk == 0 and len(turns) % 3 != 0:
+        return Verdict(
+            risk=0,
+            pattern="none",
+            signals=[],
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            source="screened",
         )
-        llm: LlmVerdict | None = resp.parsed
+
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT,
+        # Schema-constrained JSON: no fence parsing, so a malformed reply can no
+        # longer be mistaken for "safe".
+        response_mime_type="application/json",
+        response_schema=LlmVerdict,
+        max_output_tokens=600,
+        # Deterministic: the same call must not score differently on a retry, or
+        # the corpus numbers mean nothing.
+        temperature=0,
+        # Minimum reasoning: this classifier is racing a live scammer. Note Gemini
+        # 3.x rejects `thinking_budget` with a 400 -- `thinking_level` is the
+        # replacement, and Gemini 3.x thinks by default if neither is set.
+        thinking_config=types.ThinkingConfig(thinking_level="low"),
+        # We pass no tools; disabling AFC silences an SDK warning and removes any
+        # chance of the model trying to call something.
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+    try:
+        llm: LlmVerdict | None = None
+        last_error: Exception | None = None
+        # Flash tiers get transiently overloaded (503) and rate-limited (429) on the
+        # free tier. One quick retry converts most of those into a real verdict
+        # instead of dropping the whole call to the rule floor.
+        for attempt in range(2):
+            try:
+                resp = await gemini().aio.models.generate_content(
+                    model=settings().classifier_model,
+                    contents=transcript,
+                    config=config,
+                )
+                llm = resp.parsed
+                if llm is None:
+                    raise ValueError(
+                        f"no parsed verdict (raw={(resp.text or '')[:200]!r})"
+                    )
+                break
+            except Exception as e:  # noqa: PERF203 - two attempts, not a hot loop
+                last_error = e
+                transient = any(
+                    s in str(e)
+                    for s in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED")
+                )
+                if attempt == 0 and transient:
+                    await asyncio.sleep(0.4)
+                    continue
+                raise
         if llm is None:
-            raise ValueError(f"no parsed verdict (raw={(resp.text or '')[:200]!r})")
+            raise last_error or ValueError("classifier returned nothing")
     except Exception as e:
         # Never break the call audio, and never claim safety we cannot vouch for.
         # Fall back to the rule layer and label the verdict as rules-only so the UI
