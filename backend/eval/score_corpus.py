@@ -6,7 +6,8 @@ Prints a confusion matrix and per-case detail. Put the matrix on a slide -- no o
 team will have measured anything, and the false-positive number is the one that proves
 you thought about the elderly daughter-hangs-up harm and not just the demo.
 
-Only needs ANTHROPIC_API_KEY. Works before Agora enablement comes through.
+Needs only GEMINI_API_KEY, and runs without it to measure the free rule
+floor alone. Works before Agora enablement comes through.
 """
 
 from __future__ import annotations
@@ -33,9 +34,9 @@ def to_messages(turns: list[list[str]]) -> list[dict]:
 
 
 async def main() -> int:
-    if not settings().anthropic_api_key:
-        print("ANTHROPIC_API_KEY not set (see .env.example)")
-        return 2
+    if not settings().gemini_api_key:
+        print("!! GEMINI_API_KEY not set — measuring the FREE RULE LAYER only.")
+        print("   These are floor numbers, not the full system. See .env.example.\n")
 
     cases = [
         json.loads(line)
@@ -52,6 +53,29 @@ async def main() -> int:
             return case, await classify(to_messages(case["turns"]))
 
     results = await asyncio.gather(*(run(c) for c in cases))
+
+    # Infrastructure failures are NOT data points. Counting an unreachable API as a
+    # correctly-scored "safe" case is how an eval reports 0% false alarms while
+    # detecting nothing -- so they are tallied apart and they void the run.
+    errored = [(c, v) for c, v in results if not v.usable]
+    if errored:
+        print(f"\n{'=' * 58}")
+        print(f"  RUN VOID — {len(errored)}/{len(cases)} cases could not be judged")
+        print(f"{'=' * 58}")
+        # Dedupe on the cause, not the raw string: every API error carries a unique
+        # request_id, so the full message never repeats and all 28 would print.
+        seen: set[str] = set()
+        for _case, v in errored:
+            cause = (v.error or "").split("'request_id'")[0].strip().rstrip(",")
+            if cause not in seen:
+                seen.add(cause)
+                print(f"  {cause[:300]}")
+        print("\nNo accuracy numbers are reported: a failed call is not a verdict.")
+        print("Fix the cause above and re-run. Common causes:")
+        print("  - missing or invalid GEMINI_API_KEY (aistudio.google.com/apikey)")
+        print("  - free-tier rate limit hit — wait a minute and re-run")
+        print("  - model id not available to this account")
+        return 1
 
     tp = fp = tn = fn = 0
     failures: list[str] = []
@@ -78,7 +102,18 @@ async def main() -> int:
         else:
             tn += 1
             mark = "ok  "
-        print(f"{mark} {case['id']:<24} risk={v.risk:<3} {v.latency_ms:>5}ms  {v.pattern}")
+        src = "rules-only" if v.degraded else v.source
+        print(
+            f"{mark} {case['id']:<24} risk={v.risk:<3} {v.latency_ms:>5}ms  "
+            f"{v.pattern:<20} [{src}]"
+        )
+
+    # A run where every verdict came from the keyword floor is a valid measurement,
+    # but it is NOT the full system -- label it so the numbers are never quoted as if
+    # the model had been involved.
+    if results and all(v.degraded for _c, v in results):
+        print("\n!! Every case was judged by the rule layer alone (LLM unavailable).")
+        print("   Report these as rule-floor numbers, not VoiceShield's accuracy.")
 
     scams = tp + fn
     legit = tn + fp

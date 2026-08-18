@@ -125,14 +125,23 @@ class BackendClient(private val baseUrl: String = BuildConfig.BACKEND_URL) {
     }
 }
 
-/** One scored conversation turn. */
+/**
+ * One scored conversation turn.
+ *
+ * [error] non-null means the backend could not judge this turn at all (classifier
+ * outage, no API credit, unparseable output). That is NOT the same as "safe", and the
+ * UI must never render it as protection — see GuardState.DEGRADED.
+ */
 data class RiskUpdate(
     val risk: Int,
     val pattern: String,
     val signals: List<String>,
     val latencyMs: Int,
     val warned: Boolean,
+    val error: String?,
 ) {
+    val usable: Boolean get() = error == null
+
     companion object {
         fun fromJson(o: JSONObject): RiskUpdate? {
             if (o.optString("type") != "risk") return null
@@ -145,6 +154,8 @@ data class RiskUpdate(
                 },
                 latencyMs = o.optInt("latency_ms"),
                 warned = o.optBoolean("warned"),
+                // isNull() matters: optString would turn JSON null into "null".
+                error = if (o.isNull("error")) null else o.optString("error").ifBlank { null },
             )
         }
     }

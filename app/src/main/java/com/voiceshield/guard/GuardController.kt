@@ -18,7 +18,20 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-enum class GuardState { IDLE, STARTING, WATCHING, ALERT, ERROR }
+enum class GuardState {
+    IDLE,
+    STARTING,
+    WATCHING,
+    ALERT,
+    /**
+     * The session is live but the classifier could not judge the last turn. We are
+     * listening and NOT protecting. This state exists so the app never shows a
+     * protection claim it cannot back — a safety device that fails silently is worse
+     * than no device, because it supplies exactly the false confidence a scammer needs.
+     */
+    DEGRADED,
+    ERROR,
+}
 
 /** How this guard session was started. Surfaced in the UI so the demo can prove auto-arm. */
 enum class Trigger { MANUAL, UNKNOWN_CALLER }
@@ -126,6 +139,20 @@ object GuardController {
     }
 
     private fun apply(context: Context, u: RiskUpdate) {
+        if (!u.usable) {
+            // Could not judge this turn. Say so rather than implying protection.
+            Log.w(TAG, "guard degraded: ${u.error}")
+            _ui.value = _ui.value.copy(
+                state = GuardState.DEGRADED,
+                risk = 0,
+                pattern = "unjudged",
+                signals = emptyList(),
+                latencyMs = u.latencyMs,
+                message = u.error,
+            )
+            return
+        }
+
         val alerting = u.warned || u.risk >= WARN_AT
         _ui.value = _ui.value.copy(
             state = if (alerting) GuardState.ALERT else GuardState.WATCHING,
@@ -133,6 +160,7 @@ object GuardController {
             pattern = u.pattern,
             signals = u.signals,
             latencyMs = u.latencyMs,
+            message = null,
         )
         // The spoken warning is the primary channel; haptics are for the hard-of-hearing,
         // which is a large fraction of the people this app exists for.

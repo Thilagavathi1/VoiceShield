@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 private val Calm = Color(0xFF0E7C4A)
 private val Watching = Color(0xFF14532D)
 private val Danger = Color(0xFFB3121B)
+private val Degraded = Color(0xFF8A5200)
 private val Ink = Color(0xFFFFFFFF)
 
 @Composable
@@ -59,6 +60,9 @@ fun GuardScreen(
     val target = when (ui.state) {
         GuardState.ALERT -> Danger
         GuardState.WATCHING -> Watching
+        // Amber, not green: listening but unable to judge. Deliberately not the
+        // calm colour — the elder must not read this as protection.
+        GuardState.DEGRADED -> Degraded
         GuardState.ERROR -> Color(0xFF4A148C)
         else -> Color(0xFF101418)
     }
@@ -80,6 +84,12 @@ fun GuardScreen(
             when (ui.state) {
                 GuardState.ALERT -> AlertBody(ui)
                 GuardState.WATCHING -> Headline("सुन रहा हूँ", "Listening — you are protected")
+                // Never claims protection. Tells the elder plainly to be careful and
+                // to call family, because right now nothing is checking the call.
+                GuardState.DEGRADED -> Headline(
+                    "सुरक्षा बंद है",
+                    "Not protected right now — be careful, and call family before paying",
+                )
                 GuardState.STARTING -> Headline("शुरू हो रहा है…", "Starting")
                 GuardState.ERROR -> Headline("समस्या", ui.message ?: "Something went wrong")
                 GuardState.IDLE -> Headline(

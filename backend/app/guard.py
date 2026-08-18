@@ -20,26 +20,56 @@ import logging
 import time
 from typing import Any, AsyncIterator
 
-from anthropic import AsyncAnthropic
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
 
-from . import agora
+from . import agora, rules
 from .config import settings
 from .prompts import SYSTEM_PROMPT, turn_block
 
 log = logging.getLogger("voiceshield.guard")
 
-_client: AsyncAnthropic | None = None
+_client: genai.Client | None = None
 
 
-def claude() -> AsyncAnthropic:
+def gemini() -> genai.Client:
     global _client
     if _client is None:
-        _client = AsyncAnthropic(api_key=settings().anthropic_api_key)
+        _client = genai.Client(api_key=settings().gemini_api_key)
     return _client
 
 
+class LlmVerdict(BaseModel):
+    """Response schema handed to Gemini.
+
+    Passing this as `response_schema` makes the model return schema-valid JSON, so
+    there is no fenced-output guessing to do. That removes a whole class of
+    fail-open bug: previously an unparseable reply scored as "safe".
+    """
+
+    risk: int
+    pattern: str
+    signals: list[str]
+    warning_hi: str
+    warning_ta: str
+    warning_en: str
+
+
 class Verdict:
-    __slots__ = ("risk", "pattern", "signals", "warnings", "latency_ms")
+    """One turn's judgement.
+
+    `error` is the difference between "this conversation looks safe" and "we could
+    not judge it at all". Both used to come back as risk=0, which meant an outage,
+    an expired key, or an empty credit balance rendered as a green "you are
+    protected" screen. A safety device that fails silently is worse than none,
+    because it manufactures the confidence the scammer needs. Anything that cannot
+    reach a verdict must say so, loudly.
+    """
+
+    __slots__ = (
+        "risk", "pattern", "signals", "warnings", "latency_ms", "error", "source",
+    )
 
     def __init__(
         self,
@@ -48,12 +78,27 @@ class Verdict:
         signals: list[str] | None = None,
         warnings: dict[str, str] | None = None,
         latency_ms: int = 0,
+        error: str | None = None,
+        source: str = "none",
     ) -> None:
         self.risk = risk
         self.pattern = pattern
         self.signals = signals or []
         self.warnings = warnings or {}
         self.latency_ms = latency_ms
+        self.error = error
+        # "llm" full protection | "rules" degraded but real | "none" no judgement
+        self.source = source
+
+    @property
+    def usable(self) -> bool:
+        """True when this verdict reflects an actual judgement, LLM or rules."""
+        return self.source in ("llm", "rules")
+
+    @property
+    def degraded(self) -> bool:
+        """True when we judged, but only with the free keyword floor."""
+        return self.source == "rules"
 
     def warning_for(self, language: str) -> str:
         key = {"hi-IN": "warning_hi", "ta-IN": "warning_ta"}.get(language, "warning_en")
@@ -65,6 +110,9 @@ class Verdict:
             "pattern": self.pattern,
             "signals": self.signals,
             "latency_ms": self.latency_ms,
+            "error": self.error,
+            "source": self.source,
+            "degraded": self.degraded,
         }
 
 
@@ -104,41 +152,86 @@ def extract_turns(messages: list[dict[str, Any]]) -> list[str]:
 
 
 async def classify(messages: list[dict[str, Any]]) -> Verdict:
+    """Score one turn: free rule layer first, then Gemini on top.
+
+    The rule layer always runs. It is instant, costs nothing, and needs no network,
+    so it doubles as the fallback when the model is unreachable, rate-limited, or out
+    of quota -- the guard then degrades from *smart* to *basic* instead of to nothing.
+    """
     turns = extract_turns(messages)
     if not turns:
-        return Verdict()
+        return Verdict(source="none")
 
     transcript = "\n".join(turns[-16:])
+    rule = rules.score(turns)
     started = time.perf_counter()
+
     try:
-        resp = await claude().messages.create(
+        resp = await gemini().aio.models.generate_content(
             model=settings().classifier_model,
-            max_tokens=400,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": transcript}],
+            contents=transcript,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                # Schema-constrained JSON: no fence parsing, so a malformed reply
+                # can no longer be mistaken for "safe".
+                response_mime_type="application/json",
+                response_schema=LlmVerdict,
+                max_output_tokens=600,
+                # Deterministic: the same call should not score differently on a
+                # retry, or the corpus numbers mean nothing.
+                temperature=0,
+                # No thinking: this is a fast classifier racing a live scammer.
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        raw = "".join(b.text for b in resp.content if b.type == "text").strip()
-        # Be tolerant: the model may still fence the JSON despite instructions.
-        if raw.startswith("```"):
-            raw = raw.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0]
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        log.warning("classifier returned non-JSON, treating as safe")
-        return Verdict()
+        llm: LlmVerdict | None = resp.parsed
+        if llm is None:
+            raise ValueError(f"no parsed verdict (raw={(resp.text or '')[:200]!r})")
     except Exception as e:
-        # Never let a classifier failure break the call audio.
-        log.error("classifier error: %s", e)
-        return Verdict()
+        # Never break the call audio, and never claim safety we cannot vouch for.
+        # Fall back to the rule layer and label the verdict as rules-only so the UI
+        # shows reduced protection rather than a green shield.
+        log.error("LLM classifier unavailable, falling back to rules: %s", e)
+        return Verdict(
+            risk=rule.risk,
+            pattern=rule.pattern,
+            signals=rule.signals,
+            warnings=rules.canned_warnings(rule.pattern),
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            source="rules",
+            error=f"{type(e).__name__}: {e}",
+        )
 
     latency = int((time.perf_counter() - started) * 1000)
+
+    # Take the higher of the two. The rule layer scored 0 false alarms across the
+    # corpus's 12 innocent lookalikes, so it adds recall without measurably adding
+    # false positives -- but that evidence base is small, so log every disagreement
+    # and re-check it as the corpus grows.
+    risk = max(int(llm.risk), rule.risk)
+    if rule.risk >= settings().warn_threshold > int(llm.risk):
+        log.warning(
+            "rules flagged %s (%s) but LLM scored %s — review this case",
+            rule.risk,
+            rule.pattern,
+            llm.risk,
+        )
+
     return Verdict(
-        risk=int(data.get("risk", 0)),
-        pattern=str(data.get("pattern", "none")),
-        signals=list(data.get("signals", []))[:6],
+        risk=risk,
+        pattern=llm.pattern if llm.pattern != "none" else rule.pattern,
+        signals=(list(llm.signals) + rule.signals)[:6],
         warnings={
-            k: str(data.get(k, "")) for k in ("warning_hi", "warning_ta", "warning_en")
-        },
+            "warning_hi": llm.warning_hi,
+            "warning_ta": llm.warning_ta,
+            "warning_en": llm.warning_en,
+        }
+        if int(llm.risk) >= settings().warn_threshold
+        # LLM saw no need to warn but rules did: use the canned text, since the
+        # model returned empty warning strings.
+        else rules.canned_warnings(rule.pattern),
         latency_ms=latency,
+        source="llm",
     )
 
 
@@ -188,6 +281,11 @@ async def escalate(session, verdict: Verdict) -> None:
     the call and the elder would stop listening to us.
     """
     s = settings()
+    if not verdict.usable:
+        # No judgement was made. Don't speak (we have nothing to say), but the UI
+        # has already been told the guard is degraded so the elder is not shown a
+        # protection claim we cannot back.
+        return
     if verdict.risk < s.warn_threshold:
         return
     now = time.monotonic()
@@ -204,4 +302,4 @@ async def escalate(session, verdict: Verdict) -> None:
         verdict.risk,
         verdict.pattern,
     )
-    await agora.speak(session.agent_id, text)
+    await agora.speak(session.agent_id, text, channel=session.channel)
