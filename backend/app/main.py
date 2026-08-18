@@ -101,12 +101,12 @@ async def session_stop(channel: str) -> dict[str, object]:
     evidence: dict[str, object] = {}
     try:
         # Pull the transcript BEFORE stopping; short-term history dies with the agent.
-        evidence = await agora.history(session.agent_id)
+        evidence = await agora.history(session.agent_id, session.channel)
     except Exception as e:
         log.warning("could not retrieve evidence transcript: %s", e)
     finally:
         try:
-            await agora.stop_agent(session.agent_id)
+            await agora.stop_agent(session.agent_id, session.channel)
         except Exception as e:
             log.warning("stop_agent failed: %s", e)
 
@@ -125,7 +125,7 @@ async def session_metrics(channel: str) -> dict[str, object]:
     session = SESSIONS.get(channel)
     if session is None:
         raise HTTPException(404, "no such session")
-    return await agora.turns(session.agent_id)
+    return await agora.turns(session.agent_id, session.channel)
 
 
 @app.websocket("/ws/{channel}")

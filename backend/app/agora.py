@@ -38,35 +38,67 @@ def build_rtc_token(channel: str, uid: str) -> str:
     return generate_convo_ai_token(
         app_id=settings().agora_app_id,
         app_certificate=settings().agora_app_certificate,
-        channel=channel,
-        uid=uid,
+        channel_name=channel,
+        account=uid,
         token_expire=TOKEN_TTL_SECONDS,
     )
 
 
-def _auth_header() -> dict[str, str]:
+# Channel used only to mint an auth token for account-level calls that have no channel of
+# their own (listing agents, the /health probe).
+AUTH_PROBE_CHANNEL = "voiceshield-auth"
+
+
+def auth_mode() -> str:
+    """Which REST auth scheme we can use with the credentials present.
+
+    Basic auth needs a Customer ID/Secret pair, which in the redesigned Agora console is
+    no longer a self-serve item on every account. Token auth needs only the App ID and App
+    Certificate, so it is the path that always works -- we prefer Basic when available
+    purely because a single static credential is easier to debug.
+    """
     s = settings()
-    raw = f"{s.agora_customer_id}:{s.agora_customer_secret}".encode()
-    return {
-        "Authorization": f"Basic {base64.b64encode(raw).decode()}",
-        "Content-Type": "application/json",
-    }
+    if s.agora_customer_id and s.agora_customer_secret:
+        return "basic"
+    if s.agora_app_id and s.agora_app_certificate:
+        return "token"
+    return "none"
 
 
-async def _post(path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+def _auth_header(channel: str | None = None) -> dict[str, str]:
+    s = settings()
+    headers = {"Content-Type": "application/json"}
+
+    if auth_mode() == "basic":
+        raw = f"{s.agora_customer_id}:{s.agora_customer_secret}".encode()
+        headers["Authorization"] = f"Basic {base64.b64encode(raw).decode()}"
+        return headers
+
+    # Token auth. Per the docs the token's channel and uid must match the agent request,
+    # so callers pass the channel they are operating on.
+    token = build_rtc_token(channel or AUTH_PROBE_CHANNEL, AGENT_UID)
+    headers["Authorization"] = f"agora token={token}"
+    return headers
+
+
+async def _post(
+    path: str,
+    body: dict[str, Any] | None = None,
+    channel: str | None = None,
+) -> dict[str, Any]:
     url = f"{settings().agora_api_base}{path}"
     async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.post(url, json=body or {}, headers=_auth_header())
+        r = await client.post(url, json=body or {}, headers=_auth_header(channel))
     if r.status_code != 200:
         log.error("agora POST %s -> %s %s", path, r.status_code, r.text)
         r.raise_for_status()
     return r.json() if r.content else {}
 
 
-async def _get(path: str) -> dict[str, Any]:
+async def _get(path: str, channel: str | None = None) -> dict[str, Any]:
     url = f"{settings().agora_api_base}{path}"
     async with httpx.AsyncClient(timeout=20.0) as client:
-        r = await client.get(url, headers=_auth_header())
+        r = await client.get(url, headers=_auth_header(channel))
     r.raise_for_status()
     return r.json() if r.content else {}
 
@@ -164,11 +196,17 @@ async def start_agent(
     return agent_id
 
 
-async def stop_agent(agent_id: str) -> None:
-    await _post(f"/agents/{agent_id}/leave")
+async def stop_agent(agent_id: str, channel: str | None = None) -> None:
+    await _post(f"/agents/{agent_id}/leave", channel=channel)
 
 
-async def speak(agent_id: str, text: str, *, interruptable: bool = False) -> None:
+async def speak(
+    agent_id: str,
+    text: str,
+    *,
+    channel: str | None = None,
+    interruptable: bool = False,
+) -> None:
     """Barge in with a spoken warning.
 
     priority=INTERRUPT makes the agent abandon whatever it is doing and say this
@@ -183,30 +221,39 @@ async def speak(agent_id: str, text: str, *, interruptable: bool = False) -> Non
     await _post(
         f"/agents/{agent_id}/speak",
         {"text": text[:500], "priority": "INTERRUPT", "interruptable": interruptable},
+        channel=channel,
     )
 
 
-async def history(agent_id: str) -> dict[str, Any]:
+async def history(agent_id: str, channel: str | None = None) -> dict[str, Any]:
     """Short-term transcript. VoiceShield uses this as evidence for a cybercrime report."""
-    return await _get(f"/agents/{agent_id}/history")
+    return await _get(f"/agents/{agent_id}/history", channel=channel)
 
 
-async def turns(agent_id: str) -> dict[str, Any]:
+async def turns(agent_id: str, channel: str | None = None) -> dict[str, Any]:
     """Turn-level metrics. Drives the latency HUD in the demo."""
-    return await _get(f"/agents/{agent_id}/turns")
+    return await _get(f"/agents/{agent_id}/turns", channel=channel)
 
 
 async def credentials_ok() -> tuple[bool, str]:
     """Read-only probe used by /health, mirroring SETUP.md step 4."""
+    mode = auth_mode()
+    if mode == "none":
+        return False, "no usable credentials: need App ID + App Certificate at minimum"
     try:
         await _get("/agents?limit=1")
-        return True, "ok"
+        return True, f"ok (auth: {mode})"
     except httpx.HTTPStatusError as e:
         code = e.response.status_code
-        if code == 401:
-            return False, "401: customer id/secret wrong"
-        if code in (403, 404):
-            return False, f"{code}: Conversational AI not enabled on this project"
-        return False, f"{code}: {e.response.text[:200]}"
+        if code in (401, 403):
+            hint = (
+                "customer id/secret wrong"
+                if mode == "basic"
+                else "app id/certificate wrong, or token auth rejected for this call"
+            )
+            return False, f"{code} ({mode}): {hint} — {e.response.text[:160]}"
+        if code == 404:
+            return False, f"404 ({mode}): Conversational AI not enabled on this project"
+        return False, f"{code} ({mode}): {e.response.text[:200]}"
     except Exception as e:  # network, DNS, missing config
         return False, f"{type(e).__name__}: {e}"
