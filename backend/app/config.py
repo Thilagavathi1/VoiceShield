@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     warn_threshold: int = 70
     notice_threshold: int = 40
 
-    default_language: str = "hi-IN"
+    default_language: str = "ta-IN"
 
     @property
     def agora_api_base(self) -> str:

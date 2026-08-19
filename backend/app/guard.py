@@ -122,10 +122,18 @@ class Verdict:
 def extract_turns(messages: list[dict[str, Any]]) -> list[str]:
     """Flatten Agora's message history into speaker-tagged lines.
 
-    With SAL in `recognition` mode, Agora attaches speaker ids in a `metadata.vpids`
-    field. The exact shape is beta and undocumented in detail, so we probe the likely
-    locations and degrade to `unknown` rather than crashing mid-call. Log what we
-    actually receive on day 1 and tighten this.
+    Speaker identity lives at `metadata.user`. This is FACT now, captured from a real
+    Agora request, not the `metadata.vpids` this code originally guessed at:
+
+        "messages": [{"role": "user", "content": "...", "turn_id": 1,
+                      "metadata": {"source": "command", "user": "unknown", ...}}]
+
+    With SAL off, every speaker arrives as "unknown" -- the safe default, since attack
+    signals only count against the unknown speaker. Once a voiceprint is enrolled the
+    elder's turns should arrive with the registered name; confirm that value against a
+    real SAL-enabled call before trusting it, because it has not been observed yet.
+
+    `vpids` is still probed as a fallback in case SAL recognition reports through it.
     """
     out: list[str] = []
     for m in messages:
@@ -140,15 +148,15 @@ def extract_turns(messages: list[dict[str, Any]]) -> list[str]:
             continue
 
         meta = m.get("metadata") or {}
-        vpids = meta.get("vpids") or m.get("vpids")
-        if isinstance(vpids, list) and vpids:
-            speaker = str(vpids[0])
-        elif isinstance(vpids, str) and vpids:
-            speaker = vpids
-        else:
-            speaker = "unknown"
+        speaker = meta.get("user") or ""
+        if not speaker:
+            vpids = meta.get("vpids") or m.get("vpids")
+            if isinstance(vpids, list) and vpids:
+                speaker = str(vpids[0])
+            elif isinstance(vpids, str):
+                speaker = vpids
 
-        # Agora reserves "unknown"; our registered voiceprint key is "elder".
+        # Anything that is not our registered voiceprint name is a stranger.
         speaker = "elder" if speaker == "elder" else "unknown"
         out.append(turn_block(speaker, str(content).strip()))
     return out

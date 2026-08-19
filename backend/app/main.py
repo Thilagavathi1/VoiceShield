@@ -13,7 +13,9 @@ Then: ngrok http 8000   ->  put that https URL in PUBLIC_BASE_URL
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import pathlib
 import time
 from dataclasses import dataclass, field
 
@@ -163,11 +165,35 @@ async def _broadcast(session: Session, payload: dict[str, object]) -> None:
 
 # --- Agora-facing sensor ------------------------------------------------------------
 
+_DUMP_PATH = pathlib.Path("/tmp/voiceshield_llm_requests.jsonl")
+_dumped = 0
+_DUMP_LIMIT = 8
+
+
+def _dump_request(body: dict) -> None:
+    """Append the raw Agora request to a file, for the first few calls only."""
+    global _dumped
+    if _dumped >= _DUMP_LIMIT:
+        return
+    _dumped += 1
+    try:
+        with _DUMP_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(body, ensure_ascii=False) + "\n")
+        log.info("dumped Agora LLM request #%s to %s", _dumped, _DUMP_PATH)
+    except Exception as e:
+        log.warning("could not dump request: %s", e)
+
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> StreamingResponse:
     """Called by Agora once per conversation turn. Must stream SSE."""
     body = await request.json()
+
+    # Dump the first few real request bodies verbatim. The SAL `vpids` metadata shape
+    # is beta and undocumented in detail, and guard.extract_turns() has to guess where
+    # the speaker id lives -- this is how we replace that guess with fact.
+    _dump_request(body)
+
     if not body.get("stream", True):
         raise HTTPException(400, "chat completions require streaming")
 

@@ -113,19 +113,24 @@ def _agent_payload(
 
     Two choices here carry the whole project, so they're commented in place.
     """
-    sal: dict[str, Any] = {
-        # `recognition` tags every utterance with a speaker id (vpids) in the metadata
-        # handed to the custom LLM, so the classifier knows whether the ELDER or an
-        # UNKNOWN voice said a given line. That distinction is the core signal:
-        # "unknown speaker demands OTP" is a scam; the elder saying "OTP" is not.
-        # It also suppresses ambient noise, which matters on a speakerphone.
-        "sal_mode": "recognition",
-    }
-    if voiceprint_url:
-        # Personalised mode: we know exactly which voice is the person being protected.
-        # Without this, SAL falls back to identifying whoever speaks first and clearest.
-        # "unknown" is reserved by Agora, so never use it as a key.
-        sal["sample_urls"] = {"elder": voiceprint_url}
+    # Selective Attention Locking, only when we actually have a voiceprint.
+    #
+    # `recognition` is what tags each utterance with a speaker id (vpids) for the
+    # custom LLM, which is how the classifier tells "the STRANGER demanded an OTP"
+    # from "the elder repeated the word OTP". Agora rejects the join outright without
+    # a sample_url:
+    #   "properties.sal.sample_urls: must not be empty when sal_mode is 'recognition'"
+    # so enrollment is a hard prerequisite, not a nice-to-have.
+    #
+    # `locking` needs no sample, but do NOT reach for it as a substitute: it
+    # suppresses ~95% of other human voices, and on a speakerphone the "other voice"
+    # is the scammer -- the one we exist to hear. Better to run with no SAL and treat
+    # every speaker as unknown than to filter out the attacker.
+    sal_enabled = bool(voiceprint_url)
+    sal: dict[str, Any] = {}
+    if sal_enabled:
+        # "unknown" is reserved by Agora, so never use it as a voiceprint key.
+        sal = {"sal_mode": "recognition", "sample_urls": {"elder": voiceprint_url}}
 
     return {
         "name": agent_name,
@@ -140,17 +145,21 @@ def _agent_payload(
             # If the elder hangs up and leaves, don't keep billing a dead agent.
             "idle_timeout": 30,
             "advanced_features": {
-                "enable_sal": True,
+                "enable_sal": sal_enabled,
                 "enable_rtm": True,
             },
-            "sal": sal,
+            **({"sal": sal} if sal_enabled else {}),
             "asr": {
-                # Sarvam: Indic-first ASR. Scam calls are Hindi/Tamil/Hinglish,
-                # and English-first models mangle exactly the words that matter.
-                "vendor": "sarvam",
-                "credential_mode": "managed",
+                # ares is Agora's own engine and the only ASR vendor that needs no
+                # third-party credential: sarvam and microsoft both require an
+                # api_key/key of your own (BYOK), and sarvam additionally rejected an
+                # empty params block with
+                #   "Invalid value at properties.asr.params.model: required field is
+                #    missing".
+                # ares takes no params at all and covers hi-IN, ta-IN and eight more
+                # Indic languages, so it keeps the whole pipeline key-free.
+                "vendor": "ares",
                 "language": language,
-                "params": {},
             },
             "llm": {
                 # Our FastAPI guard. Required for SAL recognition, and it's where
@@ -164,20 +173,41 @@ def _agent_payload(
                 "max_history": 16,
             },
             "tts": {
-                "vendor": "microsoft",
+                # Only minimax and openai are available in managed mode on this SKU --
+                # microsoft, google, elevenlabs, cartesia, deepgram, amazon and the
+                # rest all answer "vendor is not available for the current SKU when
+                # credential_mode is 'managed'". Probed, not guessed.
+                # minimax over openai because its models are natively multilingual,
+                # and the warning has to be spoken in Hindi or Tamil to land.
+                "vendor": "minimax",
                 "credential_mode": "managed",
-                "params": {"voice_name": _voice_for(language)},
+                "params": {
+                    # Required even in managed mode: Agora supplies the credential,
+                    # not the endpoint.
+                    "url": "wss://api.minimax.io/ws/v1/t2a_v2",
+                    "model": "speech-2.8-turbo",
+                    "voice_setting": {"voice_id": _voice_for(language), "speed": 1.0},
+                    "audio_setting": {"sample_rate": 44100},
+                },
             },
         },
     }
 
 
 def _voice_for(language: str) -> str:
+    """MiniMax voice id per language.
+
+    VERIFY BY EAR before the demo. These join successfully, but a voice that
+    mispronounces Devanagari or Tamil is worse than useless in a warning -- the one
+    sentence the elder has to understand is this one. MiniMax's catalogue is larger
+    than the defaults below; swap in a native Hindi/Tamil voice once you have heard
+    the options.
+    """
     return {
-        "hi-IN": "hi-IN-SwaraNeural",
-        "ta-IN": "ta-IN-PallaviNeural",
-        "en-IN": "en-IN-NeerjaNeural",
-    }.get(language, "hi-IN-SwaraNeural")
+        "hi-IN": "Hindi_Graceful_Lady",
+        "ta-IN": "Tamil_Pleasant_Woman",
+        "en-IN": "English_captivating_female1",
+    }.get(language, "English_captivating_female1")
 
 
 async def start_agent(

@@ -83,15 +83,15 @@ fun GuardScreen(
         ) {
             when (ui.state) {
                 GuardState.ALERT -> AlertBody(ui)
-                GuardState.WATCHING -> Headline("सुन रहा हूँ", "Listening — you are protected")
+                GuardState.WATCHING -> Headline("கேட்டுக்கொண்டிருக்கிறேன்", "Listening — you are protected")
                 // Never claims protection. Tells the elder plainly to be careful and
                 // to call family, because right now nothing is checking the call.
                 GuardState.DEGRADED -> Headline(
-                    "सुरक्षा बंद है",
+                    "பாதுகாப்பு இல்லை",
                     "Not protected right now — be careful, and call family before paying",
                 )
-                GuardState.STARTING -> Headline("शुरू हो रहा है…", "Starting")
-                GuardState.ERROR -> Headline("समस्या", ui.message ?: "Something went wrong")
+                GuardState.STARTING -> Headline("தொடங்குகிறது…", "Starting")
+                GuardState.ERROR -> Headline("சிக்கல்", ui.message ?: "Something went wrong")
                 GuardState.IDLE -> Headline(
                     "VoiceShield",
                     if (autoProtectOn) {
@@ -105,9 +105,9 @@ fun GuardScreen(
             Spacer(Modifier.height(48.dp))
 
             if (ui.state == GuardState.IDLE || ui.state == GuardState.ERROR) {
-                BigButton("मुझे बचाओ\nGUARD ME", Calm, onStart)
+                BigButton("காப்பாற்றுங்க\nGUARD ME", Calm, onStart)
             } else {
-                BigButton("बंद करो\nSTOP", Color(0xFF37474F), onStop)
+                BigButton("நிறுத்துங்க\nSTOP", Color(0xFF37474F), onStop)
             }
 
             // Setup lives at the bottom of the idle screen because it is a one-time job for
@@ -155,14 +155,14 @@ private fun AlertBody(ui: GuardUi) {
     )
     Spacer(Modifier.height(28.dp))
     Text(
-        text = "रुकिए!",
+        text = "நிற்குங்க!",
         color = Ink,
         fontSize = 64.sp,
         fontWeight = FontWeight.Black,
         textAlign = TextAlign.Center,
     )
     Text(
-        text = "यह धोखा है। फ़ोन काट दीजिए।\nThis is a scam. Hang up.",
+        text = "இது மோசடி. ஃபோனை வையுங்க.\nThis is a scam. Hang up.",
         color = Ink,
         fontSize = 26.sp,
         fontWeight = FontWeight.SemiBold,
