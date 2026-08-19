@@ -117,6 +117,21 @@ COURIER = [
     "package in your name", "aapke naam se parcel",
 ]
 
+# A delivery agent at the door asking for the delivery OTP is legitimate and very
+# common: that code confirms a handover, it moves no money. Without this carve-out the
+# floor contributes 55 to every real parcel delivery.
+DELIVERY_CONTEXT = [
+    "delivery boy", "delivery agent", "delivery ka otp", "delivery otp",
+    "parcel de raha", "parcel dene", "at your door", "gate ke bahar",
+    "gate pe hoon", "niche hoon", "aapke ghar ke bahar", "courier de raha",
+    "डिलीवरी", "delivery complete",
+]
+
+MONEY_CREDENTIALS = [
+    "cvv", "pin number", "upi pin", "atm pin", "card number", "card details",
+    "card detail", "net banking", "netbanking", "password", "पिन",
+]
+
 # Explicit de-escalators. A caller who volunteers that they will never ask for an
 # OTP is behaving like a real bank; that should pull the score DOWN, not up, even
 # though the word "OTP" is present.
@@ -223,6 +238,12 @@ def score(turns: list[str]) -> RuleVerdict:
 
     if _hits(unknown_text, REASSURANCE):
         add(-45, "caller volunteered they will never ask for OTP/PIN")
+
+    # Doorstep delivery OTP, with no money credential asked for alongside it.
+    if _hits(unknown_text, DELIVERY_CONTEXT) and not _hits(
+        unknown_text, MONEY_CREDENTIALS
+    ):
+        add(-45, "doorstep delivery OTP, no banking credential requested")
 
     return RuleVerdict(
         risk=max(0, min(100, risk)),

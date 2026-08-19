@@ -43,6 +43,15 @@ async def main() -> int:
         for line in CORPUS.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+    # Optional id filter, so a tuning loop can re-run just the cases it is working
+    # on instead of paying the full corpus's rate-limited runtime each time.
+    if len(sys.argv) > 1:
+        needle = sys.argv[1]
+        cases = [c for c in cases if needle in c["id"]]
+        print(f'filter "{needle}" -> {len(cases)} case(s)')
+        if not cases:
+            print("no cases matched")
+            return 2
     threshold = settings().warn_threshold
     rpm = settings().eval_requests_per_minute
     print(f"{len(cases)} cases, warn threshold {threshold}, paced at {rpm} req/min")

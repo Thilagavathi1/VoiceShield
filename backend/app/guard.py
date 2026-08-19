@@ -169,23 +169,17 @@ async def classify(messages: list[dict[str, Any]]) -> Verdict:
     rule = rules.score(turns)
     started = time.perf_counter()
 
-    # Gate the model behind the free layer. Gemini's free tier allows only a handful
-    # of requests per minute -- far fewer than a live call produces -- so asking it
-    # about every turn guarantees rate-limit failures at the worst moment. Most turns
-    # in a real conversation trip no signal at all, and the rule layer scores those 0
-    # with zero false alarms across the corpus, so they need no second opinion.
+    # NO GATING. An earlier version skipped the model whenever the rule layer scored
+    # 0, to conserve the free tier's request budget. Measured against the hard corpus
+    # that cost 36 points of recall: investment pitches, task-job scams, SIM-swap,
+    # lapsed-insurance, fake-support and oblique "read me the six digit number" all
+    # trip no keyword at all, so screening on a silent rule layer silently discards
+    # real scams. The floor has a narrow vocabulary and zero false alarms, which makes
+    # it a good fallback and a terrible filter.
     #
-    # The periodic check is the safety valve: a scam phrased entirely in words the
-    # rule vocabulary does not know would otherwise never reach the model.
-    if rule.risk == 0 and len(turns) % 3 != 0:
-        return Verdict(
-            risk=0,
-            pattern="none",
-            signals=[],
-            latency_ms=int((time.perf_counter() - started) * 1000),
-            source="screened",
-        )
-
+    # Quota pressure is handled where it belongs instead: one retry on 429/503, and
+    # the rule floor as a labelled degraded verdict when the model truly cannot be
+    # reached. A safety device does not skip the judgement to save a request.
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         # Schema-constrained JSON: no fence parsing, so a malformed reply can no

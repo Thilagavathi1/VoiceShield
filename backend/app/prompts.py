@@ -37,14 +37,51 @@ share their screen.
 number, refusing to let them call back.
 
 # Decisive signals (each pushes risk up sharply)
-- Asking for an OTP, CVV, UPI PIN, card number, or net-banking password. No legitimate \
-bank, government body, or company ever asks for these. This alone is near-conclusive.
+- Asking for a **banking** OTP, CVV, UPI PIN, card number, or net-banking password. No \
+legitimate bank, government body, or company ever asks for these. This alone is \
+near-conclusive. The one carve-out is a **delivery OTP** from someone handing over a \
+parcel — see the legitimate cases below; do not score that on this line.
 - Instructing them to scan a QR code or approve a request to *receive* money. This is \
 always backwards; receiving money never needs a PIN.
 - Enforcing secrecy: "don't tell your family", "don't hang up", "stay on the line".
 - Threat plus deadline: arrest, disconnection, account freeze, within hours.
 - Asking them to install remote-access software.
 - Asking them to move money to a "safe" or "verification" account.
+
+# Three legitimate cases that look exactly like attacks — get these right
+These are common, and flagging them does real harm. Each was a false alarm in \
+testing.
+
+**Delivery OTP.** A delivery agent at the door asking for the delivery OTP is \
+NORMAL and legitimate. That code confirms you received a parcel; it moves no money. \
+Treat it as safe when the caller is physically delivering something the person is \
+expecting. It is only an attack if they ask for a *bank* OTP, ask for money, or are \
+not actually delivering anything.
+
+Worked example, score this **10**, not 85:
+  [unknown] Madam I am the Amazon delivery boy, I am outside your gate.
+  [elder]   Yes, come up.
+  [unknown] You will have an OTP on your phone, tell me that and delivery is complete.
+Nothing here moves money. The parcel is in his hand, the person is expecting it, and \
+the code only closes the handover. Reporting this as a scam makes people refuse their \
+own deliveries, so the bar for flagging a delivery interaction is that they ask for \
+money or for a banking credential.
+
+**Someone telling them NOT to share a credential.** "Type your PIN yourself", "don't \
+tell me the OTP, not even me", "only enter it in the app" is the OPPOSITE of an \
+attack — that is a family member or a real bank protecting them. A relative walking \
+them through setting up UPI will say the words "PIN" and "OTP" many times while \
+never asking to be told one. Score that LOW. The question is never whether a \
+credential was *mentioned*, it is whether the unknown speaker asked to be *given* \
+one.
+
+**A real emergency.** Relatives do have accidents, and the call often comes from an \
+unfamiliar number. Genuine markers: they offer to put the person on the phone, name \
+a specific verifiable hospital or address, tell the elder to come in person, and ask \
+for NO money transfer. Scam markers: money must move right now, the relative is \
+conveniently unreachable, and they must not tell anyone. Urgency and an unknown \
+number alone are not enough — demand the money-plus-secrecy combination before you \
+score this high.
 
 # NOT a scam — be strict about these
 - A real bank or delivery agent confirming a transaction the elder already knows about, \
