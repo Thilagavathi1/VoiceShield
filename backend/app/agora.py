@@ -165,7 +165,12 @@ def _agent_payload(
                 # Our FastAPI guard. Required for SAL recognition, and it's where
                 # risk scoring happens.
                 "vendor": "custom",
-                "url": settings().llm_callback_url,
+                # Carry the channel in the callback URL. Agora sends no agent_id or
+                # channel in the LLM request body, so without this the backend cannot
+                # tell which session a verdict belongs to once more than one is live --
+                # observed in practice as "verdict with no session", meaning the warning
+                # was computed (risk=95) and then dropped on the floor.
+                "url": f"{settings().llm_callback_url}?channel={channel}",
                 "params": {"model": "voiceshield-guard"},
                 "system_messages": [],
                 # Keep a short window: scam scripts escalate over several turns, so

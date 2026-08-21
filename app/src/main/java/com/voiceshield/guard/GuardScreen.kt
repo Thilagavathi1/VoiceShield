@@ -10,11 +10,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
@@ -77,6 +79,7 @@ fun GuardScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .safeDrawingPadding()
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -105,9 +108,9 @@ fun GuardScreen(
             Spacer(Modifier.height(48.dp))
 
             if (ui.state == GuardState.IDLE || ui.state == GuardState.ERROR) {
-                BigButton("காப்பாற்றுங்க\nGUARD ME", Calm, onStart)
+                BigButton("காப்பாற்றுங்க", "GUARD ME", Calm, onStart)
             } else {
-                BigButton("நிறுத்துங்க\nSTOP", Color(0xFF37474F), onStop)
+                BigButton("நிறுத்துங்க", "STOP", Color(0xFF37474F), onStop)
             }
 
             // Setup lives at the bottom of the idle screen because it is a one-time job for
@@ -127,8 +130,17 @@ fun GuardScreen(
             if (showDebug) {
                 Spacer(Modifier.height(28.dp))
                 Text(
+                    // Capped at four: the Column is centred and does not scroll, so a
+                    // six-signal verdict pushes the tail of the list off the bottom of the
+                    // screen -- during a demo that reads as a rendering bug, not as detail.
                     text = "risk ${ui.risk} · ${ui.pattern} · ${ui.latencyMs}ms · ${ui.trigger}" +
-                        if (ui.signals.isEmpty()) "" else "\n${ui.signals.joinToString(" · ")}",
+                        if (ui.signals.isEmpty()) {
+                            ""
+                        } else {
+                            val shown = ui.signals.take(4).joinToString(" · ")
+                            val extra = ui.signals.size - 4
+                            "\n" + shown + if (extra > 0) " · +$extra more" else ""
+                        },
                     color = Ink.copy(alpha = 0.72f),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -155,9 +167,14 @@ private fun AlertBody(ui: GuardUi) {
     )
     Spacer(Modifier.height(28.dp))
     Text(
-        text = "நிற்குங்க!",
+        // Same verb as the STOP button, deliberately. This screen and that button ask for
+        // one single action, and an elder reading two different words for it mid-scam has to
+        // stop and work out whether they mean the same thing.
+        text = "நிறுத்துங்க!",
         color = Ink,
-        fontSize = 64.sp,
+        // Sized so the word fits the 304dp content width on one line: a Tamil word broken
+        // across lines is a different word, not a hyphenated one.
+        fontSize = 46.sp,
         fontWeight = FontWeight.Black,
         textAlign = TextAlign.Center,
     )
@@ -190,18 +207,35 @@ private fun Headline(primary: String, secondary: String) {
 }
 
 @Composable
-private fun BigButton(label: String, color: Color, onClick: () -> Unit) {
+private fun BigButton(tamil: String, english: String, color: Color, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Ink),
         shape = CircleShape,
+        // Material3's default button padding leaves only ~172dp of text width inside this
+        // circle -- narrower than "காப்பாற்றுங்க" at label size. The word then breaks
+        // mid-word, and half a Tamil word is not a word, so widen the usable area.
+        contentPadding = PaddingValues(12.dp),
         modifier = Modifier.size(220.dp),
     ) {
-        Text(
-            text = label,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-        )
+        // Two Texts rather than one string with \n: each language gets its own size, and
+        // maxLines = 1 makes a too-long label fail loudly in review instead of silently
+        // splitting a Tamil word across lines.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = tamil,
+                fontSize = 21.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+            Text(
+                text = english,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+        }
     }
 }

@@ -22,3 +22,15 @@ backend/.venv/
 backend/**/__pycache__/
 *.pyc
 key_and_secret.txt
+
+# Per-developer AI/editor tool config. Machine-local and noisy in review; nothing here
+# is needed to build or run VoiceShield.
+.agents/
+.claude/
+.codex/
+.cursor/
+.gemini/
+.vscode/
+.zed/
+.mcp.json
+skills-lock.json

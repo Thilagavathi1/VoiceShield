@@ -30,6 +30,13 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "BACKEND_URL", "\"$voiceShieldBackendUrl\"")
+
+        // The Agora full-sdk ships native libs for four ABIs; every test phone we own is
+        // arm64. Shipping only that cuts the debug APK from ~240MB to ~70MB, which is the
+        // difference between a 2-minute and a 20-second install on each rebuild.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
