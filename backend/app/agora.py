@@ -265,11 +265,6 @@ async def history(agent_id: str, channel: str | None = None) -> dict[str, Any]:
     return await _get(f"/agents/{agent_id}/history", channel=channel)
 
 
-async def turns(agent_id: str, channel: str | None = None) -> dict[str, Any]:
-    """Turn-level metrics. Drives the latency HUD in the demo."""
-    return await _get(f"/agents/{agent_id}/turns", channel=channel)
-
-
 async def credentials_ok() -> tuple[bool, str]:
     """Read-only probe used by /health, mirroring SETUP.md step 4."""
     mode = auth_mode()

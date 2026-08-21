@@ -54,7 +54,6 @@ threshold to catch one scam usually buys you three false alarms.
 |---|---|---|
 | `POST /session/start` | Android app | RTC token + starts the guard agent |
 | `POST /session/{ch}/stop` | Android app | Stops agent, returns evidence transcript |
-| `GET /session/{ch}/metrics` | Android app | Turn latency, for the on-screen HUD |
 | `WS /ws/{ch}` | Android app | Live risk updates → red screen + haptics |
 | `POST /v1/chat/completions` | **Agora** | The sensor. SSE required. |
 | `GET /health` | you | Config and credential diagnostics |

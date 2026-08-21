@@ -41,6 +41,10 @@ log = logging.getLogger("voiceshield")
 ORPHAN_GRACE_S = 90
 # Absolute backstop for a session that somehow keeps a listener forever.
 MAX_SESSION_S = 30 * 60
+# How stale a captured transcript may get while a call is live. Below Agora's 30s
+# idle_timeout, so a session that dies without warning still has evidence from within
+# the last few seconds of the call rather than none at all.
+EVIDENCE_REFRESH_S = 20
 REAP_INTERVAL_S = 15
 
 
@@ -80,6 +84,12 @@ class Session:
     # Starts at creation time, not 0: /session/start returns before the app has had a
     # chance to open its WebSocket, and a session must not be reaped in that window.
     last_listener_at: float = field(default_factory=time.monotonic)
+    # Last transcript we managed to pull, and when. Agora deletes an agent's short-term
+    # history when the agent goes, and on the unhappy path the agent is already gone by
+    # the time we notice -- so the evidence has to be captured while the call is live,
+    # not asked for at teardown.
+    evidence: dict[str, object] = field(default_factory=dict)
+    evidence_at: float = -1e9
 
 
 SESSIONS: dict[str, Session] = {}          # channel -> session
@@ -131,6 +141,17 @@ async def session_start(req: StartRequest) -> StartResponse:
     )
 
 
+async def _snapshot_evidence(session: Session) -> bool:
+    """Capture the transcript mid-call. Never raises: this runs on background paths."""
+    try:
+        session.evidence = await agora.history(session.agent_id, session.channel)
+        session.evidence_at = time.monotonic()
+        return True
+    except Exception as e:
+        log.debug("evidence snapshot failed for %s: %s", session.channel, e)
+        return False
+
+
 async def _teardown(session: Session, reason: str) -> dict[str, object]:
     """Retire a session and its Agora agent.
 
@@ -143,11 +164,24 @@ async def _teardown(session: Session, reason: str) -> dict[str, object]:
     BY_AGENT.pop(session.agent_id, None)
 
     evidence: dict[str, object] = {}
+    stale = False
     try:
         # Pull the transcript BEFORE stopping; short-term history dies with the agent.
         evidence = await agora.history(session.agent_id, session.channel)
     except Exception as e:
-        log.warning("could not retrieve evidence transcript: %s", e)
+        # Expected whenever Agora retired the agent before us (the orphan path): history
+        # goes with the agent. Fall back to the last mid-call snapshot, which is the only
+        # copy that still exists, rather than reporting a scam call with no evidence.
+        evidence = session.evidence
+        stale = bool(evidence)
+        log.warning(
+            "live transcript unavailable for %s (%s); %s",
+            session.channel,
+            e,
+            f"using snapshot from {time.monotonic() - session.evidence_at:.0f}s before teardown"
+            if stale
+            else "no snapshot was captured either",
+        )
     finally:
         try:
             await agora.stop_agent(session.agent_id, session.channel)
@@ -157,6 +191,9 @@ async def _teardown(session: Session, reason: str) -> dict[str, object]:
     return {
         "channel": session.channel,
         "reason": reason,
+        # So a caller can tell "this is the whole call" from "this is what we had when
+        # the phone vanished" without having to guess from the content.
+        "evidence_is_snapshot": stale,
         "warned": session.warned,
         "peak_risk": session.peak_risk,
         "duration_s": round(time.monotonic() - session.started_at, 1),
@@ -190,6 +227,12 @@ async def _reap_forever() -> None:
                 else:
                     orphaned_for = now - session.last_listener_at
 
+                # Refresh regardless of orphan state: a session orphaned for less than
+                # Agora's 30s idle_timeout still has a live agent, and that is the last
+                # chance to capture the tail of the call before the history goes with it.
+                if now - session.evidence_at > EVIDENCE_REFRESH_S:
+                    await _snapshot_evidence(session)
+
                 if orphaned_for > ORPHAN_GRACE_S:
                     reason = f"orphaned {orphaned_for:.0f}s"
                 elif now - session.started_at > MAX_SESSION_S:
@@ -212,15 +255,6 @@ async def session_stop(channel: str) -> dict[str, object]:
     if session is None:
         raise HTTPException(404, "no such session")
     return await _teardown(session, "stopped by app")
-
-
-@app.get("/session/{channel}/metrics")
-async def session_metrics(channel: str) -> dict[str, object]:
-    """Turn-level latency, for the on-screen HUD in the demo."""
-    session = SESSIONS.get(channel)
-    if session is None:
-        raise HTTPException(404, "no such session")
-    return await agora.turns(session.agent_id, session.channel)
 
 
 @app.websocket("/ws/{channel}")
@@ -315,7 +349,14 @@ async def chat_completions(request: Request) -> StreamingResponse:
                 "warned": session.warned or verdict.risk >= settings().warn_threshold,
             },
         )
+        was_warned = session.warned
         await guard.escalate(session, verdict)
+        # Exactly once, when the alarm first trips: this is the call we will be asked to
+        # produce evidence for, and waiting for a clean hang-up to ask for it is how the
+        # transcript gets lost. Awaited rather than backgrounded -- it runs after the
+        # spoken barge-in, so it delays only the sensor's own response, and once per call.
+        if session.warned and not was_warned:
+            await _snapshot_evidence(session)
 
     return StreamingResponse(
         guard.stream_response(body, on_verdict),
