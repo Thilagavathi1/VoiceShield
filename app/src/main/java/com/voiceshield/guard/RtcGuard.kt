@@ -55,8 +55,55 @@ class RtcGuard(
             mAudioScenario = Constants.AUDIO_SCENARIO_CHATROOM
         }
 
-        engine = RtcEngine.create(config).apply {
+        // Diagnostic probe: RtcEngine.create() swallows native-init failures and returns
+        // null with no log of its own, so load the .so files ourselves to surface the
+        // real linker error.
+        for (lib in listOf("aosl", "agora-rtc-sdk")) {
+            try {
+                System.loadLibrary(lib)
+                Log.i(TAG, "loadLibrary($lib) OK")
+            } catch (t: Throwable) {
+                Log.e(TAG, "loadLibrary($lib) FAILED: ${t.javaClass.simpleName}: ${t.message}")
+            }
+        }
+
+        // RtcEngine.create() returns null on failure rather than throwing, so the
+        // original `create(config).apply { ... }` blew up with an NPE on enableAudio()
+        // and hid the real cause. Capture both failure modes and report them.
+        val created = try {
+            RtcEngine.create(config)
+        } catch (t: Throwable) {
+            Log.e(TAG, "RtcEngine.create threw", t)
+            onError("RtcEngine.create threw: ${t.javaClass.simpleName}: ${t.message}")
+            null
+        }
+        // Fall back to the 3-arg overload. The config-based create() returns null on this
+        // device while emitting no log of its own, and the simpler overload skips
+        // RtcEngineConfig entirely -- including mAudioScenario, the one non-default field
+        // we set. If this path works, the scenario or the config object is the culprit.
+        val engineOrNull = created ?: try {
+            Log.w(TAG, "config-based create() returned null; trying 3-arg overload")
+            RtcEngine.create(context, session.appId, handler)
+        } catch (t: Throwable) {
+            Log.e(TAG, "3-arg create threw", t)
+            null
+        }
+
+        if (engineOrNull == null) {
+            Log.e(TAG, "both create() paths failed (appId len=${session.appId.length})")
+            onError("Agora engine could not start (appId len=${session.appId.length})")
+            return
+        }
+        Log.i(TAG, "engine created via ${if (created != null) "config" else "3-arg"}")
+
+        engine = engineOrNull.apply {
             enableAudio()
+            // Set the scenario on the engine rather than trusting RtcEngineConfig: the
+            // working path on real devices is the 3-arg create(), which never sees the
+            // config object -- so mAudioScenario silently reverts to default there, and
+            // default AEC/ANS cancels the loudspeaker-borne scammer voice we exist to
+            // hear. This call is the same on both paths, so it is safe to make always.
+            setAudioScenario(Constants.AUDIO_SCENARIO_CHATROOM)
             // We publish; we do not want the agent's own audio processed as our input.
             setDefaultAudioRoutetoSpeakerphone(true)
 

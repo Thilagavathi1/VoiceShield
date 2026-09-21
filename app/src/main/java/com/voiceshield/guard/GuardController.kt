@@ -42,7 +42,11 @@ data class GuardUi(
     val pattern: String = "none",
     val signals: List<String> = emptyList(),
     val latencyMs: Int = 0,
-    val language: String = "hi-IN",
+    // ta-IN, matching the Tamil UI and the backend's own DEFAULT_LANGUAGE. This value is
+    // what Agora's ASR is configured with, and nothing ever calls setLanguage(), so the
+    // default IS the language for every session -- leaving it at hi-IN transcribed Tamil
+    // speech through a Hindi model and fed the classifier noise.
+    val language: String = "ta-IN",
     val trigger: Trigger = Trigger.MANUAL,
     val message: String? = null,
 )
@@ -153,18 +157,29 @@ object GuardController {
             return
         }
 
+        val prev = _ui.value
+        val wasAlerting = prev.state == GuardState.ALERT
         val alerting = u.warned || u.risk >= WARN_AT
-        _ui.value = _ui.value.copy(
+        // The alert is latched server-side, so turns keep arriving after the warning fires --
+        // and on a real call the next thing the scammer says is usually bland. Keep the
+        // verdict that actually tripped the alarm on screen as one consistent row, instead of
+        // letting "risk 0 / none / 0ms" sit under a red screen and contradict it.
+        val supersede = !alerting || u.risk >= prev.risk
+        _ui.value = prev.copy(
             state = if (alerting) GuardState.ALERT else GuardState.WATCHING,
-            risk = u.risk,
-            pattern = u.pattern,
-            signals = u.signals,
-            latencyMs = u.latencyMs,
+            risk = if (supersede) u.risk else prev.risk,
+            pattern = if (supersede) u.pattern else prev.pattern,
+            signals = if (supersede) u.signals else prev.signals,
+            latencyMs = if (supersede) u.latencyMs else prev.latencyMs,
             message = null,
         )
         // The spoken warning is the primary channel; haptics are for the hard-of-hearing,
         // which is a large fraction of the people this app exists for.
-        if (alerting) buzz(context)
+        //
+        // Only on a NEW escalation. Buzzing on every latched update means buzzing once per
+        // turn for the rest of the call, which stops being a signal and becomes noise the
+        // elder wants to silence -- the opposite of what we want them to do.
+        if (alerting && (!wasAlerting || u.risk > prev.risk)) buzz(context)
     }
 
     fun stop(context: Context) {

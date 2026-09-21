@@ -194,7 +194,15 @@ async def classify(messages: list[dict[str, Any]]) -> Verdict:
         # longer be mistaken for "safe".
         response_mime_type="application/json",
         response_schema=LlmVerdict,
-        max_output_tokens=600,
+        # 600 was not enough and the shortfall was invisible: the schema demands three
+        # warnings (hi/ta/en) plus a signals array, and Devanagari and Tamil cost far
+        # more tokens per character than English. A long-signals case ran out of budget
+        # partway through warning_hi, so the JSON arrived truncated, `resp.parsed` came
+        # back None, and the turn fell to the rule floor -- which scored those cases 0
+        # and 35 and recorded them as MISSes. The model had already emitted risk=95 in
+        # both. That is a truncated serialization being counted as a detection failure,
+        # and it cost 2 of the 3 misses on the hard corpus.
+        max_output_tokens=1500,
         # Deterministic: the same call must not score differently on a retry, or
         # the corpus numbers mean nothing.
         temperature=0,
