@@ -34,3 +34,6 @@ key_and_secret.txt
 .zed/
 .mcp.json
 skills-lock.json
+
+# Argent screen recordings — QA artifacts, regenerated on demand, and large.
+.argent/

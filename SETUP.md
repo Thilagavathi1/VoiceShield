@@ -70,7 +70,7 @@ Only move on when you see `200`.
 ```bash
 cd backend
 cp .env.example .env
-# then edit .env with the four Agora values + your ANTHROPIC_API_KEY
+# then edit .env with the four Agora values + your GEMINI_API_KEY
 ```
 
 ---
@@ -79,11 +79,15 @@ cp .env.example .env
 
 Decisions already made for you, with reasons — useful for your presentation's architecture slide.
 
-**ASR: `sarvam`** — Sarvam is an Indian Indic-language speech model, supported natively by Agora. It handles Hindi/Tamil and Hinglish code-mixing far better than generic English-first ASR. Scam calls are almost never in clean English, so this materially changes detection accuracy. Say this out loud in the pitch.
+> **These were the day-1 plan. Two of them did not survive contact with the API** — the
+> shipped configuration is in `backend/app/agora.py`, with the probe results in comments.
+> Quote the code, not this section.
+
+**ASR: `ares`** (planned: `sarvam`) — Sarvam is an Indian Indic-language speech model, but it is BYOK: it needs an API key of your own, and it rejects an empty params block with `Invalid value at properties.asr.params.model`. `ares` is Agora's own engine, needs no third-party credential, takes no params, and covers hi-IN, ta-IN and eight more Indic languages — so the whole pipeline stays key-free. Scam calls are almost never in clean English, and ares handles the code-mixing.
 
 **LLM: `custom`** (your FastAPI endpoint) — required, for two reasons. Selective Attention Locking in `recognition` mode only passes speaker identity (`vpids`) to a *custom* LLM, and you need your own code in the loop to score risk and fire the warning.
 
-**TTS: `managed`** — Agora supplies the credentials, so you don't need an ElevenLabs/Azure key. Pick a voice with good Hindi/Tamil pronunciation.
+**TTS: `minimax`, `credential_mode: managed`** — Agora supplies the credentials, so you don't need an ElevenLabs/Azure key. Only `minimax` and `openai` are actually available in managed mode on this SKU: microsoft, google, elevenlabs, cartesia, deepgram and amazon all answer *"vendor is not available for the current SKU when credential_mode is 'managed'"*. Minimax over openai because its models are natively multilingual, and the warning has to be spoken in Hindi or Tamil to land.
 
 **Pipeline: ASR → LLM → TTS, NOT `mllm`.** Critical. The `/speak` endpoint — your entire warning mechanism — **is not supported with `mllm` configuration**, and SAL `recognition` needs a custom LLM anyway. Every Agora starter sample pushes you toward MLLM because it's lower latency for a chatbot. Do not follow them.
 

@@ -32,7 +32,7 @@ Conversational AI not enabled on the project.
 
 ## Score the classifier (works before Agora is enabled)
 
-This only needs `ANTHROPIC_API_KEY`, so it is the most useful thing you can do on day 1
+This only needs `GEMINI_API_KEY`, so it is the most useful thing you can do on day 1
 while waiting for Conversational AI enablement.
 
 ```bash
@@ -40,10 +40,11 @@ python -m eval.score_corpus
 ```
 
 Prints per-case results plus recall, false-positive rate, precision, and classify latency.
-**Put that confusion matrix on a slide.** The seed corpus in `data/scam_corpus.jsonl` has
-16 scams and 12 innocent lookalikes; grow it toward ~40/20. The lookalikes matter more than
-the scams — a false alarm that makes an elder hang up on their real daughter is a genuine
-harm, and it is the failure mode a judge will probe in Q&A.
+**Put that confusion matrix on a slide.** The corpus in `data/scam_corpus.jsonl` holds 59
+cases — 30 scams and 29 innocent lookalikes. Current: 29/30 recall, 0/29 false alarms,
+p50 1778ms. The lookalikes matter more than the scams — a false alarm that makes an elder
+hang up on their real daughter is a genuine harm, and it is the failure mode a judge will
+probe in Q&A.
 
 When you miss a case, fix `app/prompts.py` before touching `WARN_THRESHOLD`. Lowering the
 threshold to catch one scam usually buys you three false alarms.
