@@ -42,11 +42,16 @@ data class GuardUi(
     val pattern: String = "none",
     val signals: List<String> = emptyList(),
     val latencyMs: Int = 0,
-    // ta-IN, matching the Tamil UI and the backend's own DEFAULT_LANGUAGE. This value is
-    // what Agora's ASR is configured with, and nothing ever calls setLanguage(), so the
-    // default IS the language for every session -- leaving it at hi-IN transcribed Tamil
-    // speech through a Hindi model and fed the classifier noise.
-    val language: String = "ta-IN",
+    // This value is what Agora's ASR is configured with, and nothing ever calls
+    // setLanguage(), so the default IS the language for every session -- leaving it at
+    // hi-IN transcribed Tamil speech through a Hindi model and fed the classifier noise.
+    // It also picks the TTS voice and which of warning_hi/ta/en is spoken, so all three
+    // move together; see Verdict.warning_for() in backend/app/guard.py.
+    //
+    // en-IN for the demo: ares covers en-IN, the corpus carries validated English cases
+    // in both classes, and a presenter who does not speak the language cannot deliver a
+    // convincing scam script in it. Switch back to ta-IN for a Tamil-speaking user.
+    val language: String = "en-IN",
     val trigger: Trigger = Trigger.MANUAL,
     val message: String? = null,
 )

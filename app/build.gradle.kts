@@ -71,6 +71,9 @@ dependencies {
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
+    // GppGood/GppBad/GppMaybe give the shield-status icons a dual channel with colour —
+    // an elder reading only shape, not text, still gets "protected / danger / uncertain".
+    implementation(libs.androidx.material.icons.extended)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
 

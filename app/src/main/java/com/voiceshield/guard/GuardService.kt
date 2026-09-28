@@ -65,7 +65,7 @@ class GuardService : Service() {
                 .createNotificationChannel(channel)
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("VoiceShield இயங்குகிறது")
+            .setContentTitle("VoiceShield is running")
             .setContentText("VoiceShield is protecting this call")
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setOngoing(true)

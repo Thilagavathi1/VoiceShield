@@ -43,7 +43,7 @@ object CallAlerts {
         val who = if (number.isNullOrBlank()) "Unknown number" else number
         val note = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-            .setContentTitle("தெரியாத எண் — $who")
+            .setContentTitle("Unknown number — $who")
             .setContentText("Turn on speaker, then tap Protect this call")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -54,7 +54,7 @@ object CallAlerts {
             .setFullScreenIntent(open, true)
             .addAction(
                 android.R.drawable.ic_lock_idle_lock,
-                "பாதுகாப்பை இயக்கு · Protect this call",
+                "Protect this call",
                 start,
             )
             .build()
