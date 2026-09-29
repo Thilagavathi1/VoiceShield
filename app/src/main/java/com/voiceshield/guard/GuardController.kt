@@ -83,9 +83,15 @@ object GuardController {
     var channel: String? = null
         private set
 
+    // DEGRADED is a live session -- only the classifier is down, the RTC channel, the Agora
+    // agent and the mic are all still running. Leaving it out made GuardService.stop() return
+    // early, so the Stop button silently did nothing whenever Gemini answered 503: the elder
+    // could not end the session and the mic kept streaming. Found on-device during an actual
+    // Gemini overload, not in review.
     val isActive: Boolean
         get() = _ui.value.state.let {
-            it == GuardState.STARTING || it == GuardState.WATCHING || it == GuardState.ALERT
+            it == GuardState.STARTING || it == GuardState.WATCHING ||
+                it == GuardState.ALERT || it == GuardState.DEGRADED
         }
 
     fun setLanguage(tag: String) {
